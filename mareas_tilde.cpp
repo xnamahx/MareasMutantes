@@ -71,7 +71,7 @@ struct t_mareas {
 	void changeRate();
 
 	long sf = 0;
-	long sr = 48000.0;
+	long sr = 48000.0f;
 
 	tides2::PolySlopeGenerator poly_slope_generator;
 	tides2::RampExtractor ramp_extractor;
@@ -104,7 +104,7 @@ void t_mareas::init() {
 	range_param = 0.;
 	mode_param = 0.;
 	ramp_param = 0.;
-	frequency_param = 0.5;
+	frequency_param = 0.;
 	shape_param = 0.;
 	smoothness_param = 0.5;
 	slope_param = 0.5;
@@ -125,76 +125,6 @@ void t_mareas::init() {
 
 void t_mareas::changeRate() {
 	ramp_extractor.Init(sr, 40.f / sr);
-}
-
-void t_mareas::step() {
-
-	range = (int) range_param;
-	output_mode = (tides2::OutputMode)((int) mode_param);
-	//ramp_mode = (tides2::RampMode)((int) ramp_param);
-
-
-	tides2::Range range_mode = tides2::RANGE_AUDIO;
-
-	// Get parameters
-	float slope = slope_param;
-	float shape = shape_param;
-	float smoothness = smoothness_param;
-	float shift = shift_param;
-
-	float note = frequency_param + cvinput;
-	float fm = 0.f;
-	float transposition = note + fm;
-
-	float frequency;
-
-	/*if (inputs[CLOCK_INPUT].isConnected()) {
-		if (must_reset_ramp_extractor) {
-			ramp_extractor.Reset();
-		}
-
-		tides2::Ratio r = ratio_index_quantizer.Lookup(kRatios, 0.5f + transposition * 0.0105f, 20);
-		frequency = ramp_extractor.Process(
-		              range_mode == tides2::RANGE_AUDIO,
-		              range_mode == tides2::RANGE_AUDIO && ramp_mode == tides2::RAMP_MODE_AR,
-		              r,
-		              clock_flags,
-		              ramp,
-		              tides2::kBlockSize);
-		must_reset_ramp_extractor = false;
-	}
-	else {*/
-		frequency = kRootScaled[range] / sr * stmlib::SemitonesToRatio(transposition);
-		must_reset_ramp_extractor = true;
-	//}
-
-		if (output_mode != previous_output_mode) {
-			poly_slope_generator.Reset();
-			previous_output_mode = output_mode;
-		}
-
-	// Input gates
-	trig_flags[0] = stmlib::ExtractGateFlags(previous_trig_flag, trigger >= 1.0f);
-	previous_trig_flag = trig_flags[0];
-
-	for (int i = 0; i < sf; i++) {
-
-		// Render generator
-		poly_slope_generator.Render(
-		  ramp_mode,
-		  output_mode,
-		  range_mode,
-		  frequency,
-		  slope,
-		  shape,
-		  smoothness,
-		  shift,
-		  trig_flags,
-		  NULL,
-		  out,
-		  tides2::kBlockSize);
-
-	}
 }
 
 void* mareas_new(void) {
@@ -226,15 +156,22 @@ void mareas_perform64(t_mareas* self, t_object* dsp64, double** ins, long numins
 		self->changeRate();
 	}
 
-	self->step();
-
-	for (int i = 0; i < sampleframes; i++) {
-		*out++ = self->out[i].channel[0];
-		*out2++ = self->out[i].channel[1];
-		*out3++ = self->out[i].channel[2];
-		*out4++ = self->out[i].channel[3];
+	if (self->output_mode != self->previous_output_mode) {
+		self->poly_slope_generator.Reset();
+		self->previous_output_mode = self->output_mode;
 	}
 
+	self->poly_slope_generator.Render(self->ramp_mode, self->output_mode, tides2::RANGE_AUDIO, self->frequency_param / self->sr, self->slope_param,
+			self->shape_param,
+			self->smoothness_param, self->shift_param, self->trig_flags,
+			NULL, self->out, tides2::kBlockSize);
+
+	for (int j = 0; j < tides2::kBlockSize; j++) {
+		*out++  = self->out[j].channel[0];
+		*out2++ = self->out[j].channel[1];
+		*out3++ = self->out[j].channel[2];
+		*out4++ = self->out[j].channel[3];
+	}
 }
 
 void mareas_free(t_mareas* self) {
@@ -284,7 +221,27 @@ void mareas_range(t_mareas *x, double f){
 };
 
 void mareas_mode(t_mareas *x, double f){
-	x->mode_param = f;
+	int fint = f;
+	switch (fint) {
+		case 1: 
+			x->output_mode = tides2::OUTPUT_MODE_GATES;
+			break;
+		case 2:
+			x->output_mode = tides2::OUTPUT_MODE_AMPLITUDE;
+			break;
+		case 3:
+			x->output_mode = tides2::OUTPUT_MODE_SLOPE_PHASE;
+			break;
+		case 4:
+			x->output_mode = tides2::OUTPUT_MODE_FREQUENCY;
+			break;
+		case 5:
+			x->output_mode = tides2::OUTPUT_MODE_LAST;
+			break;
+		default:
+			x->output_mode = tides2::OUTPUT_MODE_AMPLITUDE;
+			break;
+	}
 };
 
 void mareas_ramp(t_mareas *x, double f){
